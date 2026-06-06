@@ -258,7 +258,9 @@ select.setting-input option{background:var(--ink2)}
 </main>
 
 <script>
-const BASE = "http://localhost:8000";
+const BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:8000"
+  : window.location.origin;
 let busy = false, docCount = 0, chunkCount = 0, msgCount = 0, latencies = [];
 const SID   = () => document.getElementById('set-session').value || 'default';
 const TOPK  = () => parseInt(document.getElementById('set-topk').value) || 6;
