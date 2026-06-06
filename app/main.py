@@ -1,256 +1,302 @@
 """
-DocMind AI — FastAPI Backend (Gemini Free Tier)
-RAG-based PDF Q&A System using Google Gemini API (100% free, no billing)
-
-Get your free API key at: https://aistudio.google.com/app/apikey
+DocMind AI v2 — FastAPI Backend
+Enhanced RAG PDF Q&A with:
+  - Multi-turn conversation memory
+  - Per-document enable/disable
+  - Auto-summary on upload
+  - Confidence scoring
+  - Smart sentence-aware chunking
+  - Chat history export
 """
 
-import os
-import math
-import time
-import logging
+import os, math, time, re, logging
 from collections import defaultdict
 from typing import Optional
-
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
-import PyPDF2
-import io
+import PyPDF2, io
 
-# ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-# ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(
-    title="DocMind AI",
-    description="RAG-based PDF Q&A using Google Gemini (free tier)",
-    version="1.0.0",
-)
+app = FastAPI(title="DocMind AI v2", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# ── Gemini client ─────────────────────────────────────────────────────────────
 API_KEY = os.environ.get("GEMINI_API_KEY", "")
 client  = genai.Client(api_key=API_KEY) if API_KEY else None
 MODEL   = "gemini-2.5-flash"
 
-# ── In-memory store ───────────────────────────────────────────────────────────
-chunk_store:  list[dict] = []
-doc_registry: list[dict] = []
+# ── Stores ────────────────────────────────────────────────────────────────────
+chunk_store:   list[dict] = []   # {id, doc_id, doc, text, start}
+doc_registry:  list[dict] = []   # {id, name, num_chunks, size, uploaded_at, enabled, summary}
+conversations: dict[str, list]= {}  # session_id -> [{role, content}]
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHUNKING
+# SMART CHUNKING (sentence-aware)
 # ─────────────────────────────────────────────────────────────────────────────
-CHUNK_SIZE   = 500
-CHUNK_STRIDE = 400
+CHUNK_WORDS  = 400
+OVERLAP_WORDS = 80
 
-def chunk_text(text: str, doc_name: str) -> list[dict]:
-    words = text.split()
-    chunks, i, cid = [], 0, 0
-    while i < len(words):
-        chunks.append({
-            "id":    cid,
-            "doc":   doc_name,
-            "text":  " ".join(words[i : i + CHUNK_SIZE]),
-            "start": i,
-        })
-        cid += 1
-        i   += CHUNK_STRIDE
-    log.info("Chunked '%s' -> %d chunks", doc_name, len(chunks))
+def sentence_chunk(text: str, doc_name: str, doc_id: str) -> list[dict]:
+    """Split on sentence boundaries to avoid cutting mid-thought."""
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    chunks, buf, buf_words, cid = [], [], 0, 0
+    for sent in sentences:
+        w = len(sent.split())
+        if buf_words + w > CHUNK_WORDS and buf:
+            chunks.append({"id": cid, "doc_id": doc_id, "doc": doc_name,
+                           "text": " ".join(buf), "start": cid * CHUNK_WORDS})
+            cid += 1
+            # keep overlap
+            overlap, ow = [], 0
+            for s in reversed(buf):
+                sw = len(s.split())
+                if ow + sw > OVERLAP_WORDS: break
+                overlap.insert(0, s); ow += sw
+            buf, buf_words = overlap, ow
+        buf.append(sent); buf_words += w
+    if buf:
+        chunks.append({"id": cid, "doc_id": doc_id, "doc": doc_name,
+                       "text": " ".join(buf), "start": cid * CHUNK_WORDS})
+    log.info("Chunked '%s' -> %d sentence-aware chunks", doc_name, len(chunks))
     return chunks
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TF-IDF RETRIEVAL
 # ─────────────────────────────────────────────────────────────────────────────
-STOPWORDS = {
-    "the","a","an","is","it","in","on","at","to","for","of","and","or",
-    "but","this","that","was","are","be","as","with","from","by","not","its","into"
-}
+STOPWORDS = {"the","a","an","is","it","in","on","at","to","for","of","and","or",
+             "but","this","that","was","are","be","as","with","from","by","not","its","into","also"}
 
 def tokenize(text: str) -> list[str]:
-    return [w for w in text.lower().split() if w.isalpha() and w not in STOPWORDS and len(w) > 2]
+    return [w for w in re.sub(r'[^a-z\s]','',text.lower()).split()
+            if w not in STOPWORDS and len(w) > 2]
 
-def tfidf_score(query: str, chunk: dict, total: int, df: dict) -> float:
+def tfidf_score(q_terms: set, chunk: dict, total: int, df: dict) -> float:
+    cw = tokenize(chunk["text"])
+    if not cw: return 0.0
+    return sum((cw.count(t)/len(cw)) * (math.log((total+1)/(df.get(t,0)+1))+1)
+               for t in q_terms)
+
+def retrieve(query: str, k: int = 6, enabled_docs: set = None) -> list[dict]:
+    pool = [c for c in chunk_store
+            if enabled_docs is None or c["doc_id"] in enabled_docs]
+    if not pool: return []
+    df: dict[str,int] = defaultdict(int)
+    for c in pool:
+        for t in set(tokenize(c["text"])): df[t] += 1
     q_terms = set(tokenize(query))
-    c_words  = tokenize(chunk["text"])
-    if not c_words:
-        return 0.0
-    score = 0.0
-    for t in q_terms:
-        tf  = c_words.count(t) / len(c_words)
-        idf = math.log((total + 1) / (df.get(t, 0) + 1)) + 1
-        score += tf * idf
-    return score
-
-def retrieve_top_k(query: str, k: int = 5) -> list[dict]:
-    if not chunk_store:
-        return []
-    df: dict[str, int] = defaultdict(int)
-    for c in chunk_store:
-        for t in set(tokenize(c["text"])):
-            df[t] += 1
-    scored = [{**c, "score": tfidf_score(query, c, len(chunk_store), df)} for c in chunk_store]
-    scored.sort(key=lambda x: x["score"], reverse=True)
+    scored = sorted([{**c,"score":tfidf_score(q_terms,c,len(pool),df)} for c in pool],
+                    key=lambda x: x["score"], reverse=True)
     return [c for c in scored[:k] if c["score"] > 0]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PROMPT
-# ─────────────────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are DocMind AI, a precise document Q&A assistant.
-Rules:
-- Answer ONLY from the provided document chunks below.
-- If the answer is not present, say: "This information is not in the loaded documents."
-- Be concise but complete. Use bullet points for lists.
-- Mention which document or section the info comes from.
-- Never invent facts not present in the context."""
+def confidence(top_score: float) -> str:
+    if top_score > 0.05: return "high"
+    if top_score > 0.01: return "medium"
+    return "low"
 
-def build_prompt(query: str, chunks: list[dict]) -> str:
-    if not chunks:
-        context = "No relevant chunks found."
-    else:
-        context = "\n\n---\n\n".join(
-            f'[Chunk {i+1} from "{c["doc"]}" - words {c["start"]}-{c["start"]+CHUNK_SIZE}]\n{c["text"]}'
-            for i, c in enumerate(chunks)
+# ─────────────────────────────────────────────────────────────────────────────
+# PROMPTS
+# ─────────────────────────────────────────────────────────────────────────────
+SYSTEM = """You are DocMind AI, a precise document Q&A assistant.
+
+Rules:
+- Answer ONLY from the provided document context below.
+- If the answer isn't present, say: "This information is not in the loaded documents."
+- Be concise but thorough. Use bullet points for lists.
+- Cite which document/section the info comes from.
+- Never invent facts outside the provided context."""
+
+def qa_prompt(query: str, chunks: list[dict], history: list[dict]) -> str:
+    ctx = "\n\n---\n\n".join(
+        f'[Chunk {i+1} | "{c["doc"]}"]\n{c["text"]}'
+        for i, c in enumerate(chunks)
+    ) if chunks else "No relevant context found."
+
+    hist_text = ""
+    if history:
+        hist_text = "\n\nConversation so far:\n" + "\n".join(
+            f'{"User" if m["role"]=="user" else "Assistant"}: {m["content"]}'
+            for m in history[-6:]  # last 3 turns
         )
-    return f"Document context:\n\n{context}\n\n---\n\nQuestion: {query}\n\nAnswer based only on the context above:"
+
+    return f"Document context:\n\n{ctx}{hist_text}\n\n---\n\nQuestion: {query}\n\nAnswer:"
+
+SUMMARY_PROMPT = """Read this document excerpt and write a 2-3 sentence summary covering:
+1. What this document is about
+2. Key topics or entities mentioned
+Be concise and factual.
+
+Document:
+{text}"""
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SCHEMAS
 # ─────────────────────────────────────────────────────────────────────────────
 class AskRequest(BaseModel):
-    query: str
-    top_k: Optional[int] = 5
+    query:       str
+    session_id:  Optional[str] = "default"
+    top_k:       Optional[int] = 6
+    enabled_docs:Optional[list[str]] = None  # list of doc_ids; None = all
 
 class AskResponse(BaseModel):
     answer:           str
     sources:          list[str]
     chunks_retrieved: int
     top_score:        float
+    confidence:       str
     context_tokens:   int
     model:            str
     latency_ms:       int
+    session_id:       str
 
 class UploadResponse(BaseModel):
+    doc_id:     str
     doc_name:   str
     num_chunks: int
+    summary:    str
     message:    str
+
+class ToggleRequest(BaseModel):
+    doc_id:  str
+    enabled: bool
+
+class ClearHistoryRequest(BaseModel):
+    session_id: str
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
-@app.get("/", response_class=HTMLResponse, tags=["Frontend"])
-def serve_frontend():
-    html_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
+@app.get("/", response_class=HTMLResponse)
+def frontend():
+    p = os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html")
     try:
-        with open(html_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+        return HTMLResponse(open(p, encoding="utf-8").read())
     except FileNotFoundError:
-        return HTMLResponse(content="<h2>Frontend not found.</h2>")
+        return HTMLResponse("<h2>Frontend not found.</h2>")
 
-
-@app.get("/health", tags=["Health"])
+@app.get("/health")
 def health():
-    return {
-        "status":        "ok",
-        "chunks_loaded": len(chunk_store),
-        "docs_loaded":   len(doc_registry),
-        "model":         MODEL,
-        "api_key_set":   bool(API_KEY),
-    }
+    return {"status":"ok","chunks":len(chunk_store),"docs":len(doc_registry),
+            "model":MODEL,"api_key_set":bool(API_KEY)}
 
-
-@app.post("/upload", response_model=UploadResponse, tags=["Documents"])
-async def upload_document(file: UploadFile = File(...)):
+@app.post("/upload", response_model=UploadResponse)
+async def upload(file: UploadFile = File(...)):
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in {".pdf", ".txt", ".md"}:
-        raise HTTPException(400, f"Unsupported file type '{ext}'. Use .pdf, .txt, or .md")
-
+    if ext not in {".pdf",".txt",".md"}:
+        raise HTTPException(400, f"Unsupported: {ext}")
     raw = await file.read()
-
+    text = ""
     if ext == ".pdf":
         try:
-            reader = PyPDF2.PdfReader(io.BytesIO(raw))
-            text   = "\n".join(p.extract_text() or "" for p in reader.pages)
+            r = PyPDF2.PdfReader(io.BytesIO(raw))
+            text = "\n".join(p.extract_text() or "" for p in r.pages)
         except Exception as e:
-            raise HTTPException(422, f"PDF parse error: {e}")
+            raise HTTPException(422, f"PDF error: {e}")
     else:
         text = raw.decode("utf-8", errors="replace")
-
     if not text.strip():
-        raise HTTPException(422, "Document appears empty or unreadable.")
+        raise HTTPException(422, "Document is empty or unreadable.")
 
-    new_chunks = chunk_text(text, file.filename)
+    doc_id = f"doc_{int(time.time()*1000)}"
+    new_chunks = sentence_chunk(text, file.filename, doc_id)
     chunk_store.extend(new_chunks)
+
+    # Auto-summarise first ~1500 words
+    preview = " ".join(text.split()[:1500])
+    summary = "Summary unavailable."
+    if client:
+        try:
+            r = client.models.generate_content(
+                model=MODEL,
+                contents=SUMMARY_PROMPT.format(text=preview),
+                config=types.GenerateContentConfig(max_output_tokens=200, temperature=0.3),
+            )
+            summary = r.text.strip()
+        except Exception as e:
+            log.warning("Summary failed: %s", e)
+
+    size_kb = round(len(raw)/1024, 1)
     doc_registry.append({
-        "name":        file.filename,
-        "num_chunks":  len(new_chunks),
-        "uploaded_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "id": doc_id, "name": file.filename,
+        "num_chunks": len(new_chunks), "size": f"{size_kb} KB",
+        "uploaded_at": time.strftime("%H:%M %d %b"), "enabled": True,
+        "summary": summary,
     })
+    return UploadResponse(doc_id=doc_id, doc_name=file.filename,
+                          num_chunks=len(new_chunks), summary=summary,
+                          message=f"Indexed {len(new_chunks)} chunks.")
 
-    return UploadResponse(
-        doc_name=file.filename,
-        num_chunks=len(new_chunks),
-        message=f"Indexed '{file.filename}' -> {len(new_chunks)} chunks.",
-    )
+@app.post("/toggle")
+def toggle_doc(req: ToggleRequest):
+    for doc in doc_registry:
+        if doc["id"] == req.doc_id:
+            doc["enabled"] = req.enabled
+            return {"doc_id": req.doc_id, "enabled": req.enabled}
+    raise HTTPException(404, "Document not found.")
 
-
-@app.post("/ask", response_model=AskResponse, tags=["Q&A"])
+@app.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest):
     if not client:
-        raise HTTPException(500, "GEMINI_API_KEY not set. Re-run run.bat and paste your key.")
+        raise HTTPException(500, "GEMINI_API_KEY not set.")
     if not chunk_store:
-        raise HTTPException(400, "No documents loaded. Upload a file first.")
+        raise HTTPException(400, "No documents loaded.")
     if not req.query.strip():
-        raise HTTPException(400, "Query cannot be empty.")
+        raise HTTPException(400, "Empty query.")
+
+    enabled = set(req.enabled_docs) if req.enabled_docs else \
+              {d["id"] for d in doc_registry if d["enabled"]}
 
     t0         = time.time()
-    top_chunks = retrieve_top_k(req.query, k=req.top_k)
-    prompt     = build_prompt(req.query, top_chunks)
+    top_chunks = retrieve(req.query, k=req.top_k, enabled_docs=enabled)
+    history    = conversations.get(req.session_id, [])
+    prompt     = qa_prompt(req.query, top_chunks, history)
     ctx_tokens = len(prompt.split())
 
-    log.info("Calling Gemini with %d chunks in context", len(top_chunks))
     try:
-        response = client.models.generate_content(
-            model=MODEL,
-            contents=prompt,
+        resp   = client.models.generate_content(
+            model=MODEL, contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
-                max_output_tokens=1024,
-                temperature=0.2,
-            ),
+                system_instruction=SYSTEM, max_output_tokens=1200, temperature=0.2),
         )
-        answer = response.text
+        answer = resp.text
     except Exception as e:
-        raise HTTPException(502, f"Gemini API error: {str(e)}")
+        raise HTTPException(502, f"Gemini error: {e}")
 
-    latency_ms = int((time.time() - t0) * 1000)
-    sources    = list({c["doc"] for c in top_chunks})
+    # Save to conversation history
+    if req.session_id not in conversations:
+        conversations[req.session_id] = []
+    conversations[req.session_id].append({"role":"user",    "content": req.query})
+    conversations[req.session_id].append({"role":"assistant","content": answer})
+    # cap history at 20 messages
+    conversations[req.session_id] = conversations[req.session_id][-20:]
+
     top_score  = top_chunks[0]["score"] if top_chunks else 0.0
-
-    log.info("Answered in %d ms", latency_ms)
     return AskResponse(
-        answer=answer,
-        sources=sources,
-        chunks_retrieved=len(top_chunks),
-        top_score=round(top_score, 4),
-        context_tokens=ctx_tokens,
-        model=MODEL,
-        latency_ms=latency_ms,
+        answer=answer, sources=list({c["doc"] for c in top_chunks}),
+        chunks_retrieved=len(top_chunks), top_score=round(top_score,4),
+        confidence=confidence(top_score), context_tokens=ctx_tokens,
+        model=MODEL, latency_ms=int((time.time()-t0)*1000),
+        session_id=req.session_id,
     )
 
+@app.get("/history/{session_id}")
+def get_history(session_id: str):
+    return {"session_id": session_id, "messages": conversations.get(session_id, [])}
 
-@app.get("/docs-list", tags=["Documents"])
+@app.delete("/history/{session_id}")
+def clear_history(session_id: str):
+    conversations.pop(session_id, None)
+    return {"cleared": True}
+
+@app.get("/docs-list")
 def list_docs():
     return doc_registry
 
-
-@app.delete("/docs-list", tags=["Documents"])
+@app.delete("/docs-list")
 def clear_docs():
-    n = len(chunk_store)
-    chunk_store.clear()
-    doc_registry.clear()
-    return {"message": "Cleared.", "chunks_removed": n}
+    chunk_store.clear(); doc_registry.clear(); conversations.clear()
+    return {"message": "Cleared."}

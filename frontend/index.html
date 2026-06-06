@@ -3,435 +3,533 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DocMind AI — RAG PDF Q&A</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>DocMind AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  :root{
-    --bg:#0f0f11;--bg2:#18181c;--bg3:#1e1e24;
-    --border:#2a2a35;--border2:#3a3a48;
-    --text:#e8e8f0;--text2:#9090a8;--text3:#5a5a72;
-    --accent:#7c6af7;--accent2:#9d8fff;--accent-bg:rgba(124,106,247,0.12);
-    --green:#4ade80;--green-bg:rgba(74,222,128,0.1);
-    --amber:#fbbf24;--amber-bg:rgba(251,191,36,0.1);
-    --red:#f87171;--red-bg:rgba(248,113,113,0.1);
-    --radius:10px;--radius-lg:14px;
-  }
-  html,body{height:100%}
-  body{font-family:'IBM Plex Mono',monospace;background:var(--bg);color:var(--text);display:flex;flex-direction:column;height:100vh;overflow:hidden}
-
-  /* ── Header ── */
-  header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
-  .logo{display:flex;align-items:center;gap:10px}
-  .logo-icon{width:32px;height:32px;border-radius:8px;background:var(--accent-bg);border:1px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:16px}
-  .logo-text{font-size:15px;font-weight:500}
-  .logo-sub{font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase}
-  .badge{font-size:10px;padding:3px 10px;border-radius:20px;background:var(--accent-bg);color:var(--accent2);border:1px solid rgba(124,106,247,0.3);letter-spacing:.3px}
-  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--text3);display:inline-block;margin-right:6px;transition:background .3s}
-  .status-dot.ok{background:var(--green)}
-  .status-dot.err{background:var(--red)}
-
-  /* ── Layout ── */
-  main{display:grid;grid-template-columns:300px 1fr;flex:1;overflow:hidden}
-
-  /* ── Sidebar ── */
-  .sidebar{background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
-  .sidebar-section{padding:18px;border-bottom:1px solid var(--border)}
-  .section-label{font-size:10px;color:var(--text3);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:12px}
-
-  .drop-zone{border:1.5px dashed var(--border2);border-radius:var(--radius-lg);padding:26px 14px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
-  .drop-zone:hover,.drop-zone.drag{border-color:var(--accent);background:var(--accent-bg)}
-  .drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
-  .drop-icon{font-size:26px;margin-bottom:8px}
-  .drop-title{font-size:12px;color:var(--text2);margin-bottom:3px}
-  .drop-sub{font-size:10px;color:var(--text3)}
-
-  .doc-card{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px;margin-bottom:7px}
-  .doc-name{font-size:11px;font-weight:500;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .doc-meta{font-size:10px;color:var(--text3);display:flex;gap:10px}
-  .doc-status{font-size:10px;margin-top:4px}
-  .doc-status.ready{color:var(--green)}
-  .doc-status.loading{color:var(--amber)}
-
-  .chunk-stats{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:8px}
-  .stat-box{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center}
-  .stat-num{font-size:20px;font-weight:500;color:var(--accent2)}
-  .stat-label{font-size:10px;color:var(--text3);margin-top:2px}
-
-  .pipeline-info{background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:10px}
-  .pipe-step{display:flex;align-items:center;gap:7px;padding:5px 0;font-size:11px;color:var(--text2)}
-  .pipe-step+.pipe-step{border-top:1px solid var(--border)}
-  .pipe-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);flex-shrink:0}
-
-  /* ── Chat ── */
-  .chat-area{display:flex;flex-direction:column;overflow:hidden}
-  .messages{flex:1;overflow-y:auto;padding:24px;display:flex;flex-direction:column;gap:14px}
-
-  .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;text-align:center}
-  .welcome-icon{width:60px;height:60px;border-radius:14px;background:var(--accent-bg);border:1px solid rgba(124,106,247,.3);display:flex;align-items:center;justify-content:center;font-size:28px}
-  .welcome-title{font-size:17px;font-weight:500}
-  .welcome-desc{font-size:12px;color:var(--text2);max-width:340px;line-height:1.7}
-  .suggestions{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:6px}
-  .suggestion{font-size:11px;padding:6px 14px;border-radius:20px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);cursor:pointer;transition:all .15s;font-family:inherit}
-  .suggestion:hover{border-color:var(--accent);color:var(--accent2);background:var(--accent-bg)}
-
-  .msg{display:flex;gap:10px;max-width:820px}
-  .msg.user{flex-direction:row-reverse;align-self:flex-end}
-  .msg-avatar{width:30px;height:30px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500}
-  .msg.user .msg-avatar{background:var(--accent-bg);border:1px solid rgba(124,106,247,.4);color:var(--accent2)}
-  .msg.ai   .msg-avatar{background:var(--bg3);border:1px solid var(--border);color:var(--text2)}
-  .msg-bubble{background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:13px 15px;font-size:12px;line-height:1.75;color:var(--text);white-space:pre-wrap}
-  .msg.user .msg-bubble{background:var(--accent-bg);border-color:rgba(124,106,247,.3)}
-  .msg-time{font-size:10px;color:var(--text3);margin-top:5px}
-  .sources-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
-  .source-chip{font-size:10px;padding:2px 9px;border-radius:20px;background:var(--green-bg);border:1px solid rgba(74,222,128,.25);color:var(--green)}
-
-  .debug-box{margin-top:7px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--radius);padding:8px 11px;font-size:10px;color:var(--text3);line-height:1.9}
-  .debug-box .k{color:var(--accent2)}
-  .debug-box .v{color:var(--text2)}
-
-  .thinking{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text3);padding:12px 15px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg)}
-  .dots span{animation:blink 1.2s infinite;display:inline-block}
-  .dots span:nth-child(2){animation-delay:.2s}
-  .dots span:nth-child(3){animation-delay:.4s}
-  @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
-
-  .sys-msg{font-size:11px;color:var(--text3);padding:5px 0;border-bottom:1px solid var(--border);width:100%}
-  .err-msg{color:var(--red);background:var(--red-bg);border:1px solid rgba(248,113,113,.2);border-radius:var(--radius);padding:10px 13px;font-size:12px}
-
-  /* ── Pipeline bar ── */
-  .pipeline-bar{display:flex;gap:5px;align-items:center;margin-bottom:10px;font-size:10px;color:var(--text3);flex-wrap:wrap}
-  .ps{padding:2px 9px;border-radius:20px;background:var(--bg3);border:1px solid var(--border);transition:all .3s}
-  .ps.active{background:var(--amber-bg);border-color:rgba(251,191,36,.35);color:var(--amber)}
-  .ps.done{background:var(--green-bg);border-color:rgba(74,222,128,.25);color:var(--green)}
-  .pa{color:var(--text3)}
-
-  /* ── Input ── */
-  .input-area{padding:14px 20px;border-top:1px solid var(--border);background:var(--bg2);flex-shrink:0}
-  .input-row{display:flex;gap:8px;background:var(--bg3);border:1px solid var(--border2);border-radius:var(--radius-lg);padding:9px 12px;transition:border-color .2s}
-  .input-row:focus-within{border-color:var(--accent)}
-  .input-row textarea{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:inherit;font-size:12px;resize:none;line-height:1.5;min-height:18px;max-height:100px}
-  .input-row textarea::placeholder{color:var(--text3)}
-  .send-btn{width:32px;height:32px;border-radius:8px;border:none;background:var(--accent);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;align-self:flex-end}
-  .send-btn:hover{background:var(--accent2)}
-  .send-btn:disabled{background:var(--border2);cursor:not-allowed}
-  .send-btn svg{width:13px;height:13px;fill:white}
-  .input-hint{font-size:10px;color:var(--text3);margin-top:5px;text-align:right}
-
-  ::-webkit-scrollbar{width:3px}
-  ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#0d0d0f;--ink2:#1a1a1f;--ink3:#252530;--ink4:#30303d;
+  --mist:#9898b0;--fog:#5a5a72;--ghost:#2e2e3a;
+  --paper:#f0f0f8;--paper2:#e4e4f0;
+  --volt:#c8ff00;--volt2:#a8d800;--volt-bg:rgba(200,255,0,0.08);
+  --blue:#4a9eff;--blue-bg:rgba(74,158,255,0.1);
+  --rose:#ff6b8a;--rose-bg:rgba(255,107,138,0.1);
+  --amber:#ffb547;--amber-bg:rgba(255,181,71,0.1);
+  --r:8px;--r2:14px;--r3:20px;
+}
+html,body{height:100%;overflow:hidden}
+body{font-family:'Syne',sans-serif;background:var(--ink);color:var(--paper);display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-bottom:1px solid var(--ghost);background:var(--ink2);flex-shrink:0}
+.brand{display:flex;align-items:center;gap:10px}
+.brand-mark{width:34px;height:34px;border-radius:10px;background:var(--volt);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.brand-name{font-size:16px;font-weight:700;letter-spacing:-0.5px}
+.brand-ver{font-size:10px;color:var(--fog);letter-spacing:1px;text-transform:uppercase;margin-top:1px}
+.header-right{display:flex;align-items:center;gap:8px}
+.pill{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--ghost);color:var(--mist);border:1px solid var(--ink4);font-family:'JetBrains Mono',monospace}
+.pill.online{background:rgba(200,255,0,0.1);color:var(--volt);border-color:rgba(200,255,0,0.2)}
+.pill.offline{background:var(--rose-bg);color:var(--rose);border-color:rgba(255,107,138,0.2)}
+main{display:grid;grid-template-columns:285px 1fr;flex:1;overflow:hidden;min-height:0}
+.sidebar{background:var(--ink2);border-right:1px solid var(--ghost);display:flex;flex-direction:column;overflow:hidden}
+.sidebar-tabs{display:flex;border-bottom:1px solid var(--ghost);flex-shrink:0}
+.stab{flex:1;padding:10px;text-align:center;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--fog);cursor:pointer;transition:all .2s;border-bottom:2px solid transparent}
+.stab.active{color:var(--volt);border-bottom-color:var(--volt)}
+.stab-panel{flex:1;overflow-y:auto;display:none;flex-direction:column}
+.stab-panel.active{display:flex}
+.upload-area{padding:14px}
+.drop-zone{border:1.5px dashed var(--ink4);border-radius:var(--r2);padding:24px 12px;text-align:center;cursor:pointer;transition:all .2s;position:relative}
+.drop-zone:hover,.drop-zone.drag{border-color:var(--volt);background:var(--volt-bg)}
+.drop-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.dz-icon{font-size:28px;margin-bottom:8px}
+.dz-title{font-size:13px;font-weight:600;margin-bottom:3px}
+.dz-sub{font-size:11px;color:var(--fog)}
+.sec-label{font-size:10px;color:var(--fog);letter-spacing:1.5px;text-transform:uppercase;padding:12px 14px 6px;font-family:'JetBrains Mono',monospace}
+.doc-item{margin:0 10px 6px;border-radius:var(--r);border:1px solid var(--ghost);background:var(--ink3);overflow:hidden;transition:border-color .2s}
+.doc-item:hover{border-color:var(--ink4)}
+.doc-header{display:flex;align-items:center;gap:8px;padding:10px 10px 8px}
+.doc-toggle{width:32px;height:18px;border-radius:9px;border:none;cursor:pointer;background:var(--ghost);position:relative;transition:background .2s;flex-shrink:0}
+.doc-toggle.on{background:var(--volt)}
+.doc-toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:white;transition:transform .2s}
+.doc-toggle.on::after{transform:translateX(14px)}
+.doc-name{font-size:12px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-meta{display:flex;gap:6px;padding:0 10px 8px;flex-wrap:wrap}
+.doc-tag{font-size:10px;padding:2px 7px;border-radius:4px;background:var(--ghost);color:var(--mist);font-family:'JetBrains Mono',monospace}
+.doc-tag.ready{background:rgba(200,255,0,0.1);color:var(--volt)}
+.doc-summary{font-size:11px;color:var(--mist);line-height:1.6;padding:8px 10px;border-top:1px solid var(--ghost);background:var(--ink);display:none}
+.doc-item.expanded .doc-summary{display:block}
+.doc-expand{background:none;border:none;color:var(--fog);cursor:pointer;font-size:13px;padding:2px 4px;transition:color .2s}
+.doc-expand:hover{color:var(--mist)}
+.stats-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 14px}
+.stat-card{background:var(--ink3);border:1px solid var(--ghost);border-radius:var(--r);padding:10px;text-align:center}
+.stat-num{font-size:22px;font-weight:700;color:var(--volt);font-family:'JetBrains Mono',monospace}
+.stat-label{font-size:10px;color:var(--fog);margin-top:2px;letter-spacing:.5px;text-transform:uppercase}
+.clear-btn{margin:8px 14px 14px;padding:8px;border-radius:var(--r);background:var(--rose-bg);border:1px solid rgba(255,107,138,.2);color:var(--rose);font-size:12px;font-family:'Syne',sans-serif;font-weight:600;cursor:pointer;transition:all .2s}
+.clear-btn:hover{background:rgba(255,107,138,.2)}
+.settings-area{padding:14px;display:flex;flex-direction:column;gap:10px}
+.setting-row{background:var(--ink3);border:1px solid var(--ghost);border-radius:var(--r);padding:12px}
+.setting-label{font-size:12px;font-weight:600;margin-bottom:4px}
+.setting-desc{font-size:11px;color:var(--fog);line-height:1.5;margin-bottom:8px}
+.setting-input{width:100%;background:var(--ink);border:1px solid var(--ghost);border-radius:6px;padding:7px 10px;color:var(--paper);font-family:'JetBrains Mono',monospace;font-size:12px;outline:none}
+.setting-input:focus{border-color:var(--volt)}
+select.setting-input option{background:var(--ink2)}
+.chat-wrap{display:flex;flex-direction:column;height:100%;overflow:hidden}
+.chat-toolbar{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--ghost);background:var(--ink2);flex-shrink:0}
+.toolbar-title{font-size:13px;font-weight:600;flex:1}
+.toolbar-btn{background:var(--ink3);border:1px solid var(--ghost);border-radius:var(--r);padding:6px 12px;font-size:11px;font-family:'Syne',sans-serif;font-weight:600;color:var(--mist);cursor:pointer;transition:all .2s;display:flex;align-items:center;gap:5px}
+.toolbar-btn:hover{border-color:var(--ink4);color:var(--paper)}
+.toolbar-btn.danger:hover{border-color:var(--rose);color:var(--rose);background:var(--rose-bg)}
+.messages{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;min-height:0}
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:16px;text-align:center;padding:20px}
+.welcome-glyph{font-size:48px;width:80px;height:80px;background:var(--ink3);border-radius:20px;display:flex;align-items:center;justify-content:center;border:1px solid var(--ghost)}
+.welcome-title{font-size:22px;font-weight:700;letter-spacing:-0.5px}
+.welcome-sub{font-size:13px;color:var(--mist);max-width:360px;line-height:1.7}
+.quick-prompts{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin-top:4px}
+.qp{font-size:12px;padding:7px 14px;border-radius:20px;background:var(--ink3);border:1px solid var(--ghost);color:var(--mist);cursor:pointer;transition:all .15s;font-family:'Syne',sans-serif}
+.qp:hover{border-color:var(--volt);color:var(--volt);background:var(--volt-bg)}
+.msg{display:flex;gap:10px;max-width:820px;animation:fadeUp .25s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.msg.user{flex-direction:row-reverse;align-self:flex-end}
+.msg-av{width:30px;height:30px;border-radius:9px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+.msg.user .msg-av{background:var(--volt);color:var(--ink)}
+.msg.ai .msg-av{background:var(--ink3);border:1px solid var(--ghost);color:var(--mist)}
+.msg-body{display:flex;flex-direction:column;gap:4px;min-width:0}
+.msg-bubble{background:var(--ink2);border:1px solid var(--ghost);border-radius:var(--r2);padding:12px 15px;font-size:13px;line-height:1.75;color:var(--paper);white-space:pre-wrap;word-break:break-word}
+.msg.user .msg-bubble{background:var(--volt-bg);border-color:rgba(200,255,0,.2)}
+.msg-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px}
+.msg-time{font-size:10px;color:var(--fog);font-family:'JetBrains Mono',monospace}
+.conf-badge{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.conf-badge.high{background:rgba(200,255,0,.1);color:var(--volt)}
+.conf-badge.medium{background:var(--amber-bg);color:var(--amber)}
+.conf-badge.low{background:var(--rose-bg);color:var(--rose)}
+.src-chip{font-size:10px;padding:2px 8px;border-radius:4px;background:var(--blue-bg);border:1px solid rgba(74,158,255,.2);color:var(--blue);font-family:'JetBrains Mono',monospace}
+.copy-btn{background:none;border:1px solid var(--ghost);border-radius:5px;padding:2px 8px;font-size:10px;color:var(--fog);cursor:pointer;transition:all .15s;font-family:'Syne',sans-serif}
+.copy-btn:hover{color:var(--paper);border-color:var(--ink4)}
+.copy-btn.copied{color:var(--volt);border-color:rgba(200,255,0,.3)}
+.debug-row{font-size:10px;color:var(--fog);padding:5px 8px;background:var(--ink);border:1px solid var(--ghost);border-radius:6px;font-family:'JetBrains Mono',monospace;line-height:1.8;display:none}
+.debug-row.show{display:block}
+.dk{color:var(--blue)}.dv{color:var(--mist)}
+.thinking-bubble{background:var(--ink2);border:1px solid var(--ghost);border-radius:var(--r2);padding:12px 15px;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--fog)}
+.dots span{animation:blink 1.2s infinite;display:inline-block}
+.dots span:nth-child(2){animation-delay:.2s}
+.dots span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+.sys-line{font-size:11px;color:var(--fog);padding:4px 0;width:100%;border-bottom:1px solid var(--ghost);font-family:'JetBrains Mono',monospace}
+.pipeline{display:none;align-items:center;gap:4px;padding:8px 16px;border-bottom:1px solid var(--ghost);background:var(--ink2);font-size:10px;font-family:'JetBrains Mono',monospace;overflow-x:auto;flex-shrink:0}
+.ps{padding:3px 10px;border-radius:20px;background:var(--ghost);color:var(--fog);border:1px solid var(--ink4);white-space:nowrap;transition:all .3s}
+.ps.active{background:var(--amber-bg);border-color:rgba(255,181,71,.3);color:var(--amber)}
+.ps.done{background:var(--volt-bg);border-color:rgba(200,255,0,.2);color:var(--volt)}
+.pa{color:var(--ghost)}
+.input-area{padding:12px 16px;border-top:1px solid var(--ghost);background:var(--ink2);flex-shrink:0}
+.input-box{display:flex;gap:8px;background:var(--ink3);border:1px solid var(--ink4);border-radius:var(--r2);padding:10px 12px;transition:border-color .2s}
+.input-box:focus-within{border-color:var(--volt)}
+.input-box textarea{flex:1;background:none;border:none;outline:none;color:var(--paper);font-family:'Syne',sans-serif;font-size:13px;resize:none;line-height:1.5;min-height:20px;max-height:120px}
+.input-box textarea::placeholder{color:var(--fog)}
+.send-btn{width:34px;height:34px;border-radius:9px;border:none;background:var(--volt);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;align-self:flex-end}
+.send-btn:hover{background:var(--volt2)}
+.send-btn:disabled{background:var(--ghost);cursor:not-allowed}
+.send-btn svg{width:14px;height:14px;fill:var(--ink)}
+.input-hint{font-size:10px;color:var(--fog);margin-top:6px;display:flex;justify-content:space-between;font-family:'JetBrains Mono',monospace}
+.kbd{display:inline-flex;align-items:center;gap:3px;background:var(--ghost);border-radius:3px;padding:1px 5px;font-size:9px;color:var(--mist)}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-thumb{background:var(--ghost);border-radius:3px}
 </style>
 </head>
 <body>
-
 <header>
-  <div class="logo">
-    <div class="logo-icon">📄</div>
+  <div class="brand">
+    <div class="brand-mark">&#x1F9E0;</div>
     <div>
-      <div class="logo-text">DocMind AI</div>
-      <div class="logo-sub">RAG · PDF Q&A System</div>
+      <div class="brand-name">DocMind AI</div>
+      <div class="brand-ver">v2.0 &middot; RAG Q&amp;A</div>
     </div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px">
-    <span style="font-size:11px;color:var(--text3)">
-      <span class="status-dot" id="status-dot"></span>
-      <span id="status-text">checking...</span>
-    </span>
-    <div class="badge">gemini-2.0-flash</div>
+  <div class="header-right">
+    <span class="pill" id="status-pill">&#9679; connecting</span>
+    <span class="pill">gemini-2.5-flash</span>
   </div>
 </header>
 
 <main>
-  <!-- Sidebar -->
   <div class="sidebar">
-    <div class="sidebar-section">
-      <div class="section-label">Upload Document</div>
-      <div class="drop-zone" id="drop-zone">
-        <input type="file" accept=".pdf,.txt,.md" multiple id="file-input">
-        <div class="drop-icon">📂</div>
-        <div class="drop-title">Drop PDF / TXT / MD here</div>
-        <div class="drop-sub">or click to browse</div>
-      </div>
+    <div class="sidebar-tabs">
+      <div class="stab active" onclick="switchTab('docs')">Docs</div>
+      <div class="stab" onclick="switchTab('stats')">Stats</div>
+      <div class="stab" onclick="switchTab('settings')">Settings</div>
     </div>
 
-    <div class="sidebar-section" id="docs-section" style="display:none">
-      <div class="section-label">Loaded Documents</div>
-      <div id="docs-list"></div>
-      <div class="chunk-stats">
-        <div class="stat-box">
-          <div class="stat-num" id="chunk-count">0</div>
-          <div class="stat-label">Chunks</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-num" id="doc-count">0</div>
-          <div class="stat-label">Docs</div>
+    <div class="stab-panel active" id="tab-docs">
+      <div class="upload-area">
+        <div class="drop-zone" id="drop-zone">
+          <input type="file" accept=".pdf,.txt,.md" multiple id="file-input">
+          <div class="dz-icon">&#128194;</div>
+          <div class="dz-title">Upload Documents</div>
+          <div class="dz-sub">PDF &middot; TXT &middot; MD &mdash; drop or click</div>
         </div>
       </div>
-      <button onclick="clearDocs()" style="margin-top:10px;width:100%;padding:7px;background:var(--red-bg);border:1px solid rgba(248,113,113,.25);color:var(--red);border-radius:8px;cursor:pointer;font-family:inherit;font-size:11px">
-        🗑 Clear all documents
-      </button>
+      <div class="sec-label" id="docs-label" style="display:none">Loaded Documents</div>
+      <div id="docs-list" style="flex:1;overflow-y:auto;padding-bottom:8px"></div>
     </div>
 
-    <div class="sidebar-section" style="flex:1">
-      <div class="section-label">RAG Pipeline</div>
-      <div class="pipeline-info">
-        <div class="pipe-step"><div class="pipe-dot"></div>Chunk docs (500 words, 20% overlap)</div>
-        <div class="pipe-step"><div class="pipe-dot"></div>TF-IDF keyword scoring</div>
-        <div class="pipe-step"><div class="pipe-dot"></div>Top-K retrieval (K=5)</div>
-        <div class="pipe-step"><div class="pipe-dot"></div>Context injection prompt</div>
-        <div class="pipe-step"><div class="pipe-dot"></div>Grounded generation</div>
-        <div class="pipe-step"><div class="pipe-dot"></div>Source citation</div>
+    <div class="stab-panel" id="tab-stats">
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num" id="s-docs">0</div><div class="stat-label">Documents</div></div>
+        <div class="stat-card"><div class="stat-num" id="s-chunks">0</div><div class="stat-label">Chunks</div></div>
+        <div class="stat-card"><div class="stat-num" id="s-msgs">0</div><div class="stat-label">Messages</div></div>
+        <div class="stat-card"><div class="stat-num" id="s-latency">--</div><div class="stat-label">Avg ms</div></div>
+      </div>
+      <div class="sec-label">Session Info</div>
+      <div style="padding:0 14px;font-size:12px;color:var(--mist);font-family:'JetBrains Mono',monospace;line-height:2.2">
+        <div>session: <span id="s-session" style="color:var(--volt)">default</span></div>
+        <div>model: <span style="color:var(--volt)">gemini-2.5-flash</span></div>
+        <div>strategy: <span style="color:var(--volt)">TF-IDF top-6</span></div>
+        <div>chunking: <span style="color:var(--volt)">sentence-aware</span></div>
+        <div>memory: <span style="color:var(--volt)">last 3 turns</span></div>
+      </div>
+      <button class="clear-btn" onclick="clearAll()">&#128465; Clear all documents</button>
+    </div>
+
+    <div class="stab-panel" id="tab-settings">
+      <div class="settings-area">
+        <div class="setting-row">
+          <div class="setting-label">Top-K Chunks</div>
+          <div class="setting-desc">Number of document chunks retrieved per query. More = richer context but slower.</div>
+          <input class="setting-input" type="number" id="set-topk" value="6" min="1" max="20">
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">Show Debug Info</div>
+          <div class="setting-desc">Display retrieval score, token count, and latency under AI answers.</div>
+          <select class="setting-input" id="set-debug">
+            <option value="off">Off</option>
+            <option value="on">On</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">Session ID</div>
+          <div class="setting-desc">Conversation memory key. Change this to start a fresh context.</div>
+          <input class="setting-input" type="text" id="set-session" value="default" oninput="document.getElementById('s-session').textContent=this.value">
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Chat -->
-  <div class="chat-area">
+  <div class="chat-wrap">
+    <div class="chat-toolbar">
+      <span class="toolbar-title">Ask anything about your documents</span>
+      <button class="toolbar-btn" onclick="exportChat()">&#8659; Export</button>
+      <button class="toolbar-btn danger" onclick="clearHistory()">&#8635; New chat</button>
+    </div>
+
+    <div class="pipeline" id="pipeline">
+      <div class="ps" id="ps-retrieve">retrieve</div><span class="pa">&rsaquo;</span>
+      <div class="ps" id="ps-rank">rank</div><span class="pa">&rsaquo;</span>
+      <div class="ps" id="ps-inject">inject</div><span class="pa">&rsaquo;</span>
+      <div class="ps" id="ps-generate">generate</div><span class="pa">&rsaquo;</span>
+      <div class="ps" id="ps-cite">cite</div>
+    </div>
+
     <div class="messages" id="messages">
       <div class="welcome" id="welcome">
-        <div class="welcome-icon">🔍</div>
-        <div class="welcome-title">AI Document Intelligence</div>
-        <div class="welcome-desc">Upload any PDF or text file. The system chunks it, retrieves the most relevant sections, and answers your questions with source citations.</div>
-        <div class="suggestions">
-          <button class="suggestion" onclick="setQ('Summarize this document')">Summarize</button>
-          <button class="suggestion" onclick="setQ('What are the key findings?')">Key findings</button>
-          <button class="suggestion" onclick="setQ('List all main topics covered')">Main topics</button>
-          <button class="suggestion" onclick="setQ('What does this document say about neural networks?')">Neural networks</button>
+        <div class="welcome-glyph">&#x1F9E0;</div>
+        <div class="welcome-title">DocMind AI v2</div>
+        <div class="welcome-sub">Upload any PDF, TXT, or MD file. Multi-document RAG with conversation memory, confidence scoring, per-doc toggle, and source citations.</div>
+        <div class="quick-prompts">
+          <div class="qp" onclick="setQ('Summarize all loaded documents')">Summarize docs</div>
+          <div class="qp" onclick="setQ('What are the key topics covered?')">Key topics</div>
+          <div class="qp" onclick="setQ('What are the main findings or conclusions?')">Main findings</div>
+          <div class="qp" onclick="setQ('List all important terms and definitions')">Key terms</div>
+          <div class="qp" onclick="setQ('What questions does this document answer?')">What does it answer?</div>
         </div>
       </div>
     </div>
 
     <div class="input-area">
-      <div class="pipeline-bar" id="pipeline-bar" style="display:none">
-        <div class="ps" id="ps-retrieve">retrieve</div><div class="pa">→</div>
-        <div class="ps" id="ps-rank">rank</div><div class="pa">→</div>
-        <div class="ps" id="ps-inject">inject</div><div class="pa">→</div>
-        <div class="ps" id="ps-generate">generate</div><div class="pa">→</div>
-        <div class="ps" id="ps-cite">cite</div>
-      </div>
-      <div class="input-row">
-        <textarea id="q-input" placeholder="Ask anything about your documents…" rows="1"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+      <div class="input-box">
+        <textarea id="q-input" placeholder="Ask anything about your documents..." rows="1"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="send-btn" id="send-btn" onclick="send()">
           <svg viewBox="0 0 16 16"><path d="M2 8l12-6-4 6 4 6z"/></svg>
         </button>
       </div>
-      <div class="input-hint">Enter to send · Shift+Enter for newline · <span id="hint">Upload a document to begin</span></div>
+      <div class="input-hint">
+        <span><span class="kbd">Enter</span> send &nbsp;<span class="kbd">Shift+Enter</span> newline</span>
+        <span id="chunk-hint">Upload a document to begin</span>
+      </div>
     </div>
   </div>
 </main>
 
 <script>
 const BASE = "http://localhost:8000";
-let busy = false, docCount = 0, chunkCount = 0;
+let busy = false, docCount = 0, chunkCount = 0, msgCount = 0, latencies = [];
+const SID   = () => document.getElementById('set-session').value || 'default';
+const TOPK  = () => parseInt(document.getElementById('set-topk').value) || 6;
+const DEBUG = () => document.getElementById('set-debug').value === 'on';
 
-// ── Health check ──────────────────────────────────────────────────────────────
+checkHealth();
+setInterval(checkHealth, 15000);
+
 async function checkHealth() {
   try {
-    const r = await fetch(BASE + "/health");
-    const d = await r.json();
-    document.getElementById("status-dot").className  = "status-dot ok";
-    document.getElementById("status-text").textContent = "backend connected";
-    if (d.chunks_loaded > 0) {
-      chunkCount = d.chunks_loaded;
-      document.getElementById("chunk-count").textContent = chunkCount;
-      document.getElementById("hint").textContent = chunkCount + " chunks ready";
-      document.getElementById("docs-section").style.display = "block";
-    }
+    const d = await fetch(BASE+'/health').then(r=>r.json());
+    document.getElementById('status-pill').textContent = '● online';
+    document.getElementById('status-pill').className   = 'pill online';
+    if (d.chunks > 0) { chunkCount = d.chunks; docCount = d.docs; updateStats(); }
   } catch {
-    document.getElementById("status-dot").className  = "status-dot err";
-    document.getElementById("status-text").textContent = "backend offline — start server first";
+    document.getElementById('status-pill').textContent = '● offline';
+    document.getElementById('status-pill').className   = 'pill offline';
   }
 }
-checkHealth();
-setInterval(checkHealth, 10000);
 
-// ── Upload ────────────────────────────────────────────────────────────────────
-document.getElementById("file-input").addEventListener("change", async function () {
-  for (const file of this.files) await uploadFile(file);
-  this.value = "";
+function switchTab(name) {
+  ['docs','stats','settings'].forEach((t,i) => {
+    document.querySelectorAll('.stab')[i].classList.toggle('active', t===name);
+    document.getElementById('tab-'+t).classList.toggle('active', t===name);
+    document.getElementById('tab-'+t).style.display = t===name ? 'flex' : 'none';
+  });
+}
+// init display
+['stats','settings'].forEach(t => document.getElementById('tab-'+t).style.display='none');
+
+document.getElementById('file-input').addEventListener('change', async function() {
+  for (const f of this.files) await uploadFile(f);
+  this.value = '';
 });
-
-const dz = document.getElementById("drop-zone");
-dz.addEventListener("dragover",  e => { e.preventDefault(); dz.classList.add("drag"); });
-dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
-dz.addEventListener("drop", async e => {
-  e.preventDefault(); dz.classList.remove("drag");
-  for (const file of e.dataTransfer.files) await uploadFile(file);
+const dz = document.getElementById('drop-zone');
+dz.addEventListener('dragover',  e=>{e.preventDefault();dz.classList.add('drag')});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('drag'));
+dz.addEventListener('drop', async e=>{
+  e.preventDefault(); dz.classList.remove('drag');
+  for (const f of e.dataTransfer.files) await uploadFile(f);
 });
 
 async function uploadFile(file) {
-  sysMsg("⏳ Uploading " + file.name + "…");
-  const card = addDocCard(file.name, "uploading…");
-  const fd   = new FormData();
-  fd.append("file", file);
+  sysLine('Uploading ' + file.name + '...');
+  const card = makeDocCard(file.name);
+  const fd = new FormData(); fd.append('file', file);
   try {
-    const r = await fetch(BASE + "/upload", { method: "POST", body: fd });
+    const r = await fetch(BASE+'/upload',{method:'POST',body:fd});
     const d = await r.json();
-    if (!r.ok) throw new Error(d.detail || "Upload failed");
-    card.querySelector(".doc-status").textContent = "● INDEXED";
-    card.querySelector(".doc-status").className   = "doc-status ready";
-    card.querySelector(".doc-meta").textContent   = d.num_chunks + " chunks";
-    chunkCount += d.num_chunks;
-    docCount   += 1;
-    document.getElementById("chunk-count").textContent = chunkCount;
-    document.getElementById("doc-count").textContent   = docCount;
-    document.getElementById("docs-section").style.display = "block";
-    document.getElementById("hint").textContent = chunkCount + " chunks ready";
+    if (!r.ok) throw new Error(d.detail||'Upload failed');
+    updateDocCard(card, d.doc_id, d.num_chunks, (file.size/1024).toFixed(1)+' KB', d.summary);
+    chunkCount += d.num_chunks; docCount++;
+    updateStats();
+    document.getElementById('docs-label').style.display = 'block';
+    document.getElementById('chunk-hint').textContent = chunkCount+' chunks across '+docCount+' doc(s) ready';
     hideWelcome();
-    sysMsg("✅ Indexed: " + file.name + " → " + d.num_chunks + " chunks");
-  } catch (e) {
-    card.querySelector(".doc-status").textContent = "✗ Error";
-    card.querySelector(".doc-status").style.color = "var(--red)";
-    sysMsg("❌ Upload failed: " + e.message);
+    sysLine('Indexed: '+file.name+' → '+d.num_chunks+' chunks');
+  } catch(e) {
+    card.querySelector('.doc-tag').textContent = 'ERROR';
+    card.querySelector('.doc-tag').style.color = 'var(--rose)';
+    sysLine('Error: '+e.message);
   }
 }
 
-function addDocCard(name, status) {
-  const list = document.getElementById("docs-list");
-  const d    = document.createElement("div");
-  d.className = "doc-card";
-  d.innerHTML = `<div class="doc-name">📄 ${name}</div>
-    <div class="doc-meta">loading…</div>
-    <div class="doc-status loading">● ${status.toUpperCase()}</div>`;
-  list.appendChild(d);
-  return d;
+function makeDocCard(name) {
+  const list = document.getElementById('docs-list');
+  const el = document.createElement('div');
+  el.className = 'doc-item';
+  el.innerHTML =
+    '<div class="doc-header">' +
+      '<button class="doc-toggle on" data-id="" onclick="toggleDoc(this)"></button>' +
+      '<div class="doc-name" title="'+name+'">'+name+'</div>' +
+      '<button class="doc-expand" onclick="this.closest(\'.doc-item\').classList.toggle(\'expanded\')">▾</button>' +
+    '</div>' +
+    '<div class="doc-meta">' +
+      '<span class="doc-tag" style="color:var(--amber)">indexing...</span>' +
+    '</div>' +
+    '<div class="doc-summary">Generating summary...</div>';
+  list.appendChild(el);
+  return el;
 }
 
-async function clearDocs() {
-  await fetch(BASE + "/docs-list", { method: "DELETE" });
-  document.getElementById("docs-list").innerHTML = "";
-  document.getElementById("docs-section").style.display = "none";
-  chunkCount = docCount = 0;
-  document.getElementById("chunk-count").textContent = "0";
-  document.getElementById("doc-count").textContent   = "0";
-  document.getElementById("hint").textContent = "Upload a document to begin";
-  sysMsg("🗑 All documents cleared.");
+function updateDocCard(card, docId, chunks, size, summary) {
+  card.querySelector('.doc-toggle').dataset.id = docId;
+  const meta = card.querySelector('.doc-meta');
+  meta.innerHTML =
+    '<span class="doc-tag ready">● READY</span>' +
+    '<span class="doc-tag">'+chunks+' chunks</span>' +
+    '<span class="doc-tag">'+size+'</span>';
+  card.querySelector('.doc-summary').textContent = summary || 'No summary available.';
 }
 
-// ── Chat ──────────────────────────────────────────────────────────────────────
-function setQ(q) {
-  document.getElementById("q-input").value = q;
-  document.getElementById("q-input").focus();
+async function toggleDoc(btn) {
+  const id = btn.dataset.id;
+  if (!id) return;
+  const enabled = !btn.classList.contains('on');
+  btn.classList.toggle('on', enabled);
+  await fetch(BASE+'/toggle',{
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({doc_id:id, enabled})
+  });
 }
 
-function hideWelcome() {
-  const w = document.getElementById("welcome");
-  if (w) w.style.display = "none";
+function updateStats() {
+  document.getElementById('s-docs').textContent    = docCount;
+  document.getElementById('s-chunks').textContent  = chunkCount;
+  document.getElementById('s-msgs').textContent    = msgCount;
+  const avg = latencies.length ? Math.round(latencies.reduce((a,b)=>a+b)/latencies.length) : '--';
+  document.getElementById('s-latency').textContent = avg;
 }
 
-function sysMsg(text) {
-  const msgs = document.getElementById("messages");
+function setQ(q) { document.getElementById('q-input').value=q; document.getElementById('q-input').focus(); }
+function hideWelcome() { const w=document.getElementById('welcome'); if(w) w.style.display='none'; }
+function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
+function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();} }
+
+function sysLine(txt) {
   hideWelcome();
-  const d = document.createElement("div");
-  d.className = "sys-msg";
-  d.textContent = text;
-  msgs.appendChild(d);
-  msgs.scrollTop = 9999;
-}
-
-function addBubble(role, content, sources = [], debug = null) {
-  hideWelcome();
-  const msgs = document.getElementById("messages");
-  const d    = document.createElement("div");
-  d.className = "msg " + role;
-  const srcHTML = sources.length
-    ? '<div class="sources-row">' + sources.map(s => `<span class="source-chip">📎 ${s}</span>`).join("") + "</div>"
-    : "";
-  const dbgHTML = debug
-    ? `<div class="debug-box">
-        <span class="k">chunks_retrieved:</span> <span class="v">${debug.chunks_retrieved}</span> &nbsp;
-        <span class="k">top_score:</span> <span class="v">${debug.top_score}</span><br>
-        <span class="k">context_tokens:</span> <span class="v">~${debug.context_tokens}</span> &nbsp;
-        <span class="k">latency:</span> <span class="v">${debug.latency_ms}ms</span><br>
-        <span class="k">model:</span> <span class="v">${debug.model}</span>
-       </div>`
-    : "";
-  d.innerHTML = `<div class="msg-avatar">${role === "user" ? "U" : "AI"}</div>
-    <div>
-      <div class="msg-bubble">${content}</div>
-      ${srcHTML}${dbgHTML}
-      <div class="msg-time">${new Date().toLocaleTimeString()}</div>
-    </div>`;
-  msgs.appendChild(d);
-  msgs.scrollTop = 9999;
-  return d;
+  const el=document.createElement('div');
+  el.className='sys-line'; el.textContent=txt;
+  document.getElementById('messages').appendChild(el);
+  document.getElementById('messages').scrollTop=9999;
 }
 
 async function animatePipeline(step) {
-  const order = ["retrieve", "rank", "inject", "generate", "cite"];
-  document.getElementById("pipeline-bar").style.display = "flex";
-  order.forEach(s => {
-    const el = document.getElementById("ps-" + s);
-    el.className = "ps";
-    if (order.indexOf(s) < order.indexOf(step)) el.classList.add("done");
-    else if (s === step) el.classList.add("active");
+  const order=['retrieve','rank','inject','generate','cite'];
+  document.getElementById('pipeline').style.display='flex';
+  order.forEach(s=>{
+    const el=document.getElementById('ps-'+s);
+    el.className='ps';
+    if(order.indexOf(s)<order.indexOf(step)) el.classList.add('done');
+    else if(s===step) el.classList.add('active');
   });
-  await new Promise(r => setTimeout(r, 300));
+  await new Promise(r=>setTimeout(r,280));
 }
 
-function allPipelineDone() {
-  ["retrieve","rank","inject","generate","cite"].forEach(s =>
-    document.getElementById("ps-" + s).className = "ps done"
-  );
+function pipelineDone() {
+  ['retrieve','rank','inject','generate','cite'].forEach(s=>
+    document.getElementById('ps-'+s).className='ps done');
+  setTimeout(()=>{
+    document.getElementById('pipeline').style.display='none';
+    ['retrieve','rank','inject','generate','cite'].forEach(s=>
+      document.getElementById('ps-'+s).className='ps');
+  },1800);
+}
+
+function addMsg(role, content, meta={}) {
+  hideWelcome();
+  const msgs=document.getElementById('messages');
+  const d=document.createElement('div');
+  d.className='msg '+role;
+
+  let footer='<div class="msg-footer">';
+  footer+='<span class="msg-time">'+new Date().toLocaleTimeString()+'</span>';
+  if(role==='ai'){
+    if(meta.confidence) footer+='<span class="conf-badge '+meta.confidence+'">'+meta.confidence+'</span>';
+    if(meta.sources&&meta.sources.length)
+      meta.sources.forEach(s=>{footer+='<span class="src-chip">'+s+'</span>';});
+    const escaped=content.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n');
+    footer+='<button class="copy-btn" onclick="copyText(this,\''+escaped+'\')">copy</button>';
+  }
+  footer+='</div>';
+
+  let debug='';
+  if(role==='ai'&&meta.chunks_retrieved!==undefined){
+    debug='<div class="debug-row'+(DEBUG()?' show':'')+'">'+
+      '<span class="dk">chunks:</span> <span class="dv">'+meta.chunks_retrieved+'</span>  '+
+      '<span class="dk">score:</span> <span class="dv">'+meta.top_score+'</span>  '+
+      '<span class="dk">tokens:</span> <span class="dv">~'+meta.context_tokens+'</span>  '+
+      '<span class="dk">latency:</span> <span class="dv">'+meta.latency_ms+'ms</span>'+
+    '</div>';
+  }
+
+  d.innerHTML=
+    '<div class="msg-av">'+(role==='user'?'U':'AI')+'</div>'+
+    '<div class="msg-body">'+
+      '<div class="msg-bubble">'+content+'</div>'+
+      footer+debug+
+    '</div>';
+  msgs.appendChild(d);
+  msgs.scrollTop=9999;
+}
+
+function copyText(btn,text) {
+  navigator.clipboard.writeText(text.replace(/\\n/g,'\n')).then(()=>{
+    btn.textContent='copied!'; btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='copy';btn.classList.remove('copied');},2000);
+  });
 }
 
 async function send() {
-  const input = document.getElementById("q-input");
-  const q     = input.value.trim();
-  if (!q || busy) return;
-  busy = true;
-  document.getElementById("send-btn").disabled = true;
-  input.value = "";
+  const input=document.getElementById('q-input');
+  const q=input.value.trim();
+  if(!q||busy) return;
+  busy=true;
+  document.getElementById('send-btn').disabled=true;
+  input.value=''; input.style.height='auto';
 
-  addBubble("user", q);
+  addMsg('user',q); msgCount++;
 
-  // Pipeline animation
-  await animatePipeline("retrieve");
-  await animatePipeline("rank");
-  await animatePipeline("inject");
+  await animatePipeline('retrieve');
+  await animatePipeline('rank');
+  await animatePipeline('inject');
 
-  // Thinking indicator
-  const thinking = document.createElement("div");
-  thinking.className = "msg ai";
-  thinking.innerHTML = `<div class="msg-avatar">AI</div>
-    <div class="thinking">Generating answer<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>`;
-  document.getElementById("messages").appendChild(thinking);
-  document.getElementById("messages").scrollTop = 9999;
+  const thinking=document.createElement('div');
+  thinking.className='msg ai';
+  thinking.innerHTML='<div class="msg-av">AI</div>'+
+    '<div class="msg-body"><div class="thinking-bubble">Generating answer'+
+    '<span class="dots"><span>.</span><span>.</span><span>.</span></span></div></div>';
+  document.getElementById('messages').appendChild(thinking);
+  document.getElementById('messages').scrollTop=9999;
 
-  await animatePipeline("generate");
+  await animatePipeline('generate');
 
   try {
-    const r = await fetch(BASE + "/ask", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ query: q, top_k: 5 }),
+    const r=await fetch(BASE+'/ask',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({query:q, session_id:SID(), top_k:TOPK()})
     });
-    const d = await r.json();
+    const d=await r.json();
+    if(!r.ok) throw new Error(d.detail||'Request failed');
     thinking.remove();
-    if (!r.ok) throw new Error(d.detail || "Request failed");
-
-    await animatePipeline("cite");
-    allPipelineDone();
-    addBubble("ai", d.answer, d.sources, d);
-  } catch (e) {
-    thinking.remove();
-    allPipelineDone();
-    const err = document.createElement("div");
-    err.className = "msg ai";
-    err.innerHTML = `<div class="msg-avatar">AI</div><div class="err-msg">❌ ${e.message}</div>`;
-    document.getElementById("messages").appendChild(err);
-    document.getElementById("messages").scrollTop = 9999;
+    await animatePipeline('cite');
+    pipelineDone();
+    addMsg('ai', d.answer, d);
+    latencies.push(d.latency_ms); msgCount++;
+    updateStats();
+  } catch(e) {
+    thinking.remove(); pipelineDone();
+    addMsg('ai','Error: '+e.message);
   }
 
-  busy = false;
-  document.getElementById("send-btn").disabled = false;
-  setTimeout(() => {
-    document.getElementById("pipeline-bar").style.display = "none";
-    ["retrieve","rank","inject","generate","cite"].forEach(s =>
-      document.getElementById("ps-" + s).className = "ps"
-    );
-  }, 2000);
+  busy=false;
+  document.getElementById('send-btn').disabled=false;
+}
+
+function exportChat() {
+  const lines=['DocMind AI - Chat Export','Session: '+SID(),'Date: '+new Date().toLocaleString(),'='.repeat(50)];
+  document.getElementById('messages').querySelectorAll('.msg').forEach(m=>{
+    const role=m.classList.contains('user')?'USER':'AI';
+    const text=m.querySelector('.msg-bubble')?.textContent||'';
+    const time=m.querySelector('.msg-time')?.textContent||'';
+    lines.push('\n['+role+'] '+time+'\n'+text);
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/plain'}));
+  a.download='docmind-chat-'+Date.now()+'.txt';
+  a.click();
+}
+
+async function clearHistory() {
+  await fetch(BASE+'/history/'+SID(),{method:'DELETE'});
+  const msgs=document.getElementById('messages');
+  msgs.innerHTML='';
+  const w=document.createElement('div');
+  w.className='welcome'; w.id='welcome';
+  w.innerHTML='<div class="welcome-glyph">&#x1F9E0;</div>'+
+    '<div class="welcome-title">New conversation</div>'+
+    '<div class="welcome-sub">History cleared. Your documents are still loaded.</div>';
+  msgs.appendChild(w);
+  msgCount=0; latencies=[]; updateStats();
+}
+
+async function clearAll() {
+  await fetch(BASE+'/docs-list',{method:'DELETE'});
+  document.getElementById('docs-list').innerHTML='';
+  document.getElementById('docs-label').style.display='none';
+  chunkCount=docCount=msgCount=0; latencies=[];
+  document.getElementById('chunk-hint').textContent='Upload a document to begin';
+  updateStats();
+  sysLine('All documents and history cleared.');
 }
 </script>
 </body>
