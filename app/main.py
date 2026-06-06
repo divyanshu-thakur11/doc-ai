@@ -91,7 +91,8 @@ def retrieve(query: str, k: int = 6, enabled_docs: set = None) -> list[dict]:
     q_terms = set(tokenize(query))
     scored = sorted([{**c,"score":tfidf_score(q_terms,c,len(pool),df)} for c in pool],
                     key=lambda x: x["score"], reverse=True)
-    return [c for c in scored[:k] if c["score"] > 0]
+    # Always return top-K even if score is 0 — Gemini will use general knowledge as fallback
+    return scored[:k]
 
 def confidence(top_score: float) -> str:
     if top_score > 0.05: return "high"
@@ -101,14 +102,15 @@ def confidence(top_score: float) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # PROMPTS
 # ─────────────────────────────────────────────────────────────────────────────
-SYSTEM = """You are DocMind AI, a precise document Q&A assistant.
+SYSTEM = """You are DocMind AI, a helpful document Q&A assistant.
 
 Rules:
-- Answer ONLY from the provided document context below.
-- If the answer isn't present, say: "This information is not in the loaded documents."
-- Be concise but thorough. Use bullet points for lists.
-- Cite which document/section the info comes from.
-- Never invent facts outside the provided context."""
+- Always give the most useful answer possible using the provided document context.
+- If the exact answer is present: answer directly and cite the source document/section.
+- If the exact answer is NOT present but related information exists: say "The document doesn't directly cover this, but here's the closest relevant information:" then provide it.
+- If the topic is completely absent from the documents: briefly say so, then answer from your general knowledge and clearly label it "[General knowledge — not from documents]".
+- Never refuse to answer or leave the user with nothing — always provide the most helpful response possible.
+- Be concise but thorough. Use bullet points for lists."""
 
 def qa_prompt(query: str, chunks: list[dict], history: list[dict]) -> str:
     ctx = "\n\n---\n\n".join(
